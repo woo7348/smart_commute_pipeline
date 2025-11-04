@@ -46,3 +46,4 @@ dags/__pycache__/
 db/init.sql~backup
 output/
 raw/
+.env
