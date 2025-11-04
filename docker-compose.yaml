@@ -1,33 +1,56 @@
+version: '3.8'
+
 services:
   postgres:
-    image: postgres:14
+    image: postgres:13
+    container_name: smart_commute_postgres
     environment:
       POSTGRES_USER: airflow
       POSTGRES_PASSWORD: airflow
       POSTGRES_DB: airflow
     ports:
-      - "5432:5432"
+      - "5432:5432"    # ✅ 로컬(macOS)에서도 접근 가능
     volumes:
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   adminer:
     image: adminer
+    container_name: smart_commute_adminer
+    restart: always
     ports:
-      - "8080:8080"
+      - "8082:8080"   # ✅ Adminer → http://localhost:8082
+    depends_on:
+      - postgres
 
   airflow:
     image: apache/airflow:2.9.0
+    container_name: smart_commute_airflow
     depends_on:
       - postgres
     environment:
       - AIRFLOW__CORE__EXECUTOR=SequentialExecutor
-      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+      - AIRFLOW__CORE__FERNET_KEY=YOUR_RANDOM_KEY_HERE
+      - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=true
+      - AIRFLOW__CORE__LOAD_EXAMPLES=false
     volumes:
       - ./dags:/opt/airflow/dags
       - ./src:/opt/airflow/src
+      - ./logs:/opt/airflow/logs
     ports:
-      - "8081:8080"
+      - "8081:8080"   # ✅ Airflow UI → http://localhost:8081
     command: >
-      bash -c "airflow db init &&
-               airflow users create --username admin --password admin --role Admin --firstname Air --lastname Flow --email admin@example.com &&
-               airflow webserver & airflow scheduler"
+      bash -c "
+        airflow db init &&
+        airflow users create --username admin --password admin --role Admin --firstname Air --lastname Flow --email admin@example.com &&
+        airflow webserver & airflow scheduler
+      "
+
+volumes:
+  postgres_data:

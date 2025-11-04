@@ -1,0 +1,2 @@
+2025-11-04 14:54:55,531 [ERROR] ❌ Failed to fetch weather data: 401 Client Error: Unauthorized for url: https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst?q=Seoul&lang=ko
+2025-11-04 14:55:39,701 [ERROR] ❌ Failed to fetch weather data: 401 Client Error: Unauthorized for url: https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst?q=Seoul&lang=ko

@@ -1,20 +1,42 @@
-import requests, json, os, datetime, logging
+import os
+import requests
+import json
+import datetime
+from dotenv import load_dotenv
 
-API_KEY = os.getenv("WEATHER_API_KEY")
-BASE_URL = "https://api.weatherapi.com/v1/current.json"
+load_dotenv()
+SERVICE_KEY = os.getenv("WEATHER_API_KEY")
 
-def fetch_weather(city="Seoul"):
-    params = {"key": API_KEY, "q": city}
-    r = requests.get(BASE_URL, params=params)
-    r.raise_for_status()
-    data = r.json()
-    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+BASE_URL = "http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst"
+
+def fetch_weather(nx=60, ny=127):
+    now = datetime.datetime.now()
+    base_date = now.strftime("%Y%m%d")
+    base_time = "0500"  # 새벽 예보 기준 (테스트용)
+
+    params = {
+        "serviceKey": SERVICE_KEY,  # 인코딩 없이 원본 값 사용
+        "numOfRows": 1000,
+        "pageNo": 1,
+        "dataType": "JSON",
+        "base_date": base_date,
+        "base_time": base_time,
+        "nx": nx,
+        "ny": ny
+    }
+
+    response = requests.get(BASE_URL, params=params)
+    print("📡 Request URL:", response.url)
+    response.raise_for_status()
+    data = response.json()
+
     os.makedirs("raw", exist_ok=True)
-    with open(f"raw/weather_{ts}.json", "w") as f:
-        json.dump(data, f)
-    logging.info(f"Weather data saved: {ts}")
+    filepath = f"raw/weather_{base_date}_{base_time}.json"
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+    print(f"✅ Saved weather data to {filepath}")
     return data
 
 if __name__ == "__main__":
-    logging.basicConfig(filename="logs/data_ingestion.log", level=logging.INFO)
     fetch_weather()
