@@ -33,10 +33,12 @@ services:
     container_name: smart_commute_airflow
     depends_on:
       - postgres
+    env_file:
+      - .env
     environment:
       - AIRFLOW__CORE__EXECUTOR=SequentialExecutor
       - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
-      - AIRFLOW__CORE__FERNET_KEY=YOUR_RANDOM_KEY_HERE
+      - AIRFLOW__CORE__FERNET_KEY=9c4guElT4vaK0Q-Rjs1E3Lf4cUgeRKLEAF7LJJwY0Nw=
       - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=true
       - AIRFLOW__CORE__LOAD_EXAMPLES=false
     volumes:
