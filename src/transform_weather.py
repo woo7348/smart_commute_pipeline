@@ -1,44 +1,45 @@
 import json
-import glob
 import pandas as pd
+import numpy as np
 import os
 
-def transform_latest_weather():
-    os.makedirs("output", exist_ok=True)
+input_path = "raw/asos_daily_108_202505_full.json"
+output_dir = "output"
+os.makedirs(output_dir, exist_ok=True)
 
-    # 1️⃣ 최신 raw 파일 선택
-    files = sorted(glob.glob("raw/weather_*.json"))
-    if not files:
-        raise FileNotFoundError("No weather JSON files found in raw/")
-    latest_file = files[-1]
-    print(f"📂 Using latest file: {latest_file}")
+# JSON 로드
+with open(input_path, "r", encoding="utf-8") as f:
+    data = json.load(f)
 
-    # 2️⃣ JSON 로드
-    with open(latest_file, "r", encoding="utf-8") as f:
-        data = json.load(f)
+df = pd.DataFrame(data)
 
-    items = data["response"]["body"]["items"]["item"]
-    df = pd.DataFrame(items)
+# ✅ 필요한 컬럼만 선택
+cols = ["tm", "avgTa", "maxTa", "minTa", "sumRn", "avgWs", "maxWs", "avgRhm", "ssDur"]
+df = df[cols]
 
-    # 3️⃣ 관심 변수만 선택
-    df = df[["category", "fcstDate", "fcstTime", "fcstValue"]]
+# ✅ 컬럼명 변경
+df.rename(columns={
+    "tm": "date",
+    "avgTa": "avg_temp",
+    "maxTa": "max_temp",
+    "minTa": "min_temp",
+    "sumRn": "rainfall",
+    "avgWs": "avg_wind",
+    "maxWs": "max_wind",
+    "avgRhm": "humidity",
+    "ssDur": "sunshine"
+}, inplace=True)
 
-    # 4️⃣ pivot 변환 (행: 날짜/시간, 열: category)
-    pivoted = df.pivot_table(
-        index=["fcstDate", "fcstTime"],
-        columns="category",
-        values="fcstValue",
-        aggfunc="first"
-    ).reset_index()
+# ✅ 문자열 → 숫자 변환
+numeric_cols = ["avg_temp", "max_temp", "min_temp", "rainfall", "avg_wind", "max_wind", "humidity", "sunshine"]
+df[numeric_cols] = df[numeric_cols].replace("", np.nan).astype(float)
 
-    # 5️⃣ CSV 저장
-    output_path = "output/weather_processed.csv"
-    pivoted.to_csv(output_path, index=False, encoding="utf-8-sig")
+# ✅ 날짜형 변환
+df["date"] = pd.to_datetime(df["date"])
 
-    print(f"✅ Transformed data saved: {output_path}")
-    return pivoted
+# ✅ CSV 저장
+output_path = os.path.join(output_dir, "asos_seoul_202505_clean.csv")
+df.to_csv(output_path, index=False, encoding="utf-8-sig")
 
-
-if __name__ == "__main__":
-    df = transform_latest_weather()
-    print(df.tail(5))  # 마지막 5행 출력
+print(f"✅ Clean CSV saved → {output_path}")
+print(df.head())
