@@ -1,0 +1,17 @@
+# Apache Airflow & Core Dependencies
+apache-airflow==2.9.0
+apache-airflow-providers-postgres==5.11.1
+apache-airflow-providers-http==4.14.1
+
+# Data Processing & DB
+pandas==2.1.4
+psycopg2-binary==2.9.9
+sqlalchemy==2.0.23
+
+# API & Utilities
+requests==2.31.0
+python-dotenv==1.0.0
+
+# Utilities
+click==8.1.7
+pytz==2023.3
