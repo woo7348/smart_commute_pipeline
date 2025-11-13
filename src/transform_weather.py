@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import os
 
-input_path = "raw/asos_daily_108_202505_full.json"
+input_path = "raw/asos_daily_108_202506_full.json"
 output_dir = "output"
 os.makedirs(output_dir, exist_ok=True)
 
@@ -38,7 +38,7 @@ df[numeric_cols] = df[numeric_cols].replace("", np.nan).astype(float)
 df["date"] = pd.to_datetime(df["date"])
 
 # ✅ CSV 저장
-output_path = os.path.join(output_dir, "asos_seoul_202505_clean.csv")
+output_path = os.path.join(output_dir, "asos_seoul_202506_clean.csv")
 df.to_csv(output_path, index=False, encoding="utf-8-sig")
 
 print(f"✅ Clean CSV saved → {output_path}")

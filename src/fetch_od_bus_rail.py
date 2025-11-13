@@ -1,17 +1,94 @@
+"""
+fetch_od_bus_rail.py
+---------------------
+일일 OD(버스/도시철도) 데이터를 수집하는 스크립트.
+NiFi 자동화에 맞게 디렉토리 구조 및 처리 방식 리팩토링.
+
+변경 사항:
+1. data/raw/od/YYYY/MM 구조로 저장 (NiFi가 모니터링하기 최적)
+2. Safe Request 도입 (재시도/지연)
+3. 사용자 입력 제거 (자동화 환경에 맞춤)
+4. 여러 JSON → 월 단위 병합 → 중간파일 삭제
+5. 절대경로 기반으로 경로 안전하게 처리
+
+Author : MinWoo Kang
+Project : Smart Commute Pipeline
+"""
+
 import os
 import json
+import time
 import requests
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
+
+# --------------------------------------------------------------------
+# 🌐 환경 변수 로드
+# --------------------------------------------------------------------
 load_dotenv()
 SERVICE_KEY = os.getenv("OD_API_KEY")
+if not SERVICE_KEY:
+    raise ValueError("❌ OD_API_KEY not found in .env file")
 
-BASE_URL = "https://apis.data.go.kr/1613000/ODUsageforGeneralBusesandUrbanRailways/getDailyODUsageforGeneralBusesandUrbanRailways"
+BASE_URL = (
+    "https://apis.data.go.kr/1613000/"
+    "ODUsageforGeneralBusesandUrbanRailways/getDailyODUsageforGeneralBusesandUrbanRailways"
+)
+
+# 절대 경로 구성
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+RAW_OD_DIR = os.path.join(BASE_DIR, "../data/raw/od")
 
 
-def fetch_od_daily(opr_ymd, dptre_ctpv_cd="11", dptre_sgg_cd="11110", arvl_ctpv_cd="11", arvl_sgg_cd="11680"):
-    """일자별 API 호출"""
+# --------------------------------------------------------------------
+# 📁 JSON 저장 함수 (NiFi Friendly)
+# --------------------------------------------------------------------
+def save_json(year, month, filename, data):
+    """
+    data/raw/od/YYYY/MM/filename.json 형식으로 저장
+    """
+    year_dir = os.path.join(RAW_OD_DIR, str(year))
+    month_dir = os.path.join(year_dir, f"{month:02d}")
+
+    os.makedirs(month_dir, exist_ok=True)
+
+    filepath = os.path.join(month_dir, filename)
+
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+    print(f"💾 Saved → {filepath}")
+    return filepath
+
+
+# --------------------------------------------------------------------
+# 🔁 Safe Request (재시도 포함)
+# --------------------------------------------------------------------
+def safe_request(params, max_retries=3, delay=5):
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = requests.get(BASE_URL, params=params, timeout=(5, 60))
+            response.raise_for_status()
+            return response
+        except Exception as e:
+            print(f"⚠️ Attempt {attempt}/{max_retries} failed: {e}")
+            time.sleep(delay)
+
+    print("❌ All retry attempts failed.")
+    return None
+
+
+# --------------------------------------------------------------------
+# 📥 일자별 API 호출
+# --------------------------------------------------------------------
+def fetch_od_daily(opr_ymd, year, month,
+                   dptre_ctpv_cd="11", dptre_sgg_cd="11110",
+                   arvl_ctpv_cd="11", arvl_sgg_cd="11680"):
+    """
+    일자별 OD 데이터 호출 후 JSON 저장
+    """
+
     params = {
         "serviceKey": SERVICE_KEY,
         "pageNo": "1",
@@ -21,180 +98,157 @@ def fetch_od_daily(opr_ymd, dptre_ctpv_cd="11", dptre_sgg_cd="11110", arvl_ctpv_
         "dptre_sgg_cd": dptre_sgg_cd,
         "arvl_ctpv_cd": arvl_ctpv_cd,
         "arvl_sgg_cd": arvl_sgg_cd,
-        "dataType": "JSON"
+        "dataType": "JSON",
     }
 
-    response = requests.get(BASE_URL, params=params)
-    os.makedirs("raw/tmp", exist_ok=True)
+    print(f"📡 Requesting OD: {opr_ymd}")
+
+    response = safe_request(params)
+    if not response:
+        return None
 
     try:
         data = response.json()
-        if "Response" in data and "body" in data["Response"]:
-            items = data["Response"]["body"].get("items", {}).get("item", [])
-            filename = f"raw/tmp/od_{opr_ymd}.json"
-            with open(filename, "w", encoding="utf-8") as f:
-                json.dump(items, f, ensure_ascii=False)
-            print(f"✅ {opr_ymd}: {len(items)} records")
-            return filename
-        else:
-            print(f"⚠️ {opr_ymd}: Unexpected response structure")
-            return None
-    except Exception as e:
-        print(f"❌ {opr_ymd}: Error parsing JSON - {e}")
+    except Exception:
+        print(f"❌ JSON Parse Error on {opr_ymd}")
         return None
 
+    # 내부 구조 탐색
+    items = data.get("Response", {}).get("body", {}).get("items", {}).get("item", [])
 
-def merge_json_files(file_list, output_path):
+    filename = f"od_{opr_ymd}.json"
+    return save_json(year, month, filename, items)
+
+
+# --------------------------------------------------------------------
+# 🧩 여러 JSON 병합
+# --------------------------------------------------------------------
+def merge_json_files(file_list, year, month, output_filename):
     """여러 JSON 파일 병합"""
+
     all_items = []
-    for file in file_list:
+
+    for file_path in file_list:
         try:
-            with open(file, "r", encoding="utf-8") as f:
+            with open(file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if isinstance(data, list):
                     all_items.extend(data)
         except Exception as e:
-            print(f"⚠️ Skipped {file}: {e}")
+            print(f"⚠️ Skipped {file_path}: {e}")
 
-    if not all_items:
-        print(f"⚠️ No data to save for {output_path}")
-        return None
-
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(all_items, f, ensure_ascii=False, indent=2)
-
-    print(f"💾 Merged {len(all_items)} records → {output_path}")
-    return output_path
+    # 저장
+    return save_json(year, month, output_filename, all_items)
 
 
-def fetch_od_monthly_final(year=2025, month=4, chunk_size=10, **kwargs):
-    """10일 단위로 임시 병합 후 마지막에 월 전체 병합"""
+# --------------------------------------------------------------------
+# 🌕 월 전체 수집 (일별 요청 → 병합 → 중간삭제)
+# --------------------------------------------------------------------
+def fetch_od_monthly(year, month, chunk_size=10, **kwargs):
+    """
+    1. 하루 단위로 API 요청
+    2. chunk_size(10일) 단위로 병합
+    3. 마지막에 full 파일 생성
+    """
+
+    print(f"📅 Fetching OD Monthly → {year}-{month:02d}")
+
     start_date = datetime(year, month, 1)
-    if month == 12:
-        end_date = datetime(year + 1, 1, 1) - timedelta(days=1)
-    else:
-        end_date = datetime(year, month + 1, 1) - timedelta(days=1)
+    end_date = (
+        datetime(year + (month // 12), (month % 12) + 1, 1)
+        - timedelta(days=1)
+    )
 
-    current_date = start_date
-    tmp_files = []
+    current = start_date
+    temp_files = []
     chunk_files = []
-    chunk_start = current_date.strftime("%Y%m%d")
 
-    while current_date <= end_date:
-        opr_ymd = current_date.strftime("%Y%m%d")
-        f = fetch_od_daily(opr_ymd, **kwargs)
-        if f:
-            tmp_files.append(f)
+    chunk_start_date = current.strftime("%Y%m%d")
 
-        # 10일 단위 또는 마지막 날짜 도달 시 병합
-        if len(tmp_files) == chunk_size or current_date == end_date:
-            chunk_end = opr_ymd
-            os.makedirs("raw", exist_ok=True)
-            chunk_path = f"raw/od_{chunk_start}_to_{chunk_end}.json"
-            merge_json_files(tmp_files, chunk_path)
-            chunk_files.append(chunk_path)
+    while current <= end_date:
+        opr_ymd = current.strftime("%Y%m%d")
 
-            # 임시 개별 파일 삭제
-            for tf in tmp_files:
+        file_path = fetch_od_daily(opr_ymd, year, month, **kwargs)
+        if file_path:
+            temp_files.append(file_path)
+
+        # 10일 단위 병합
+        if len(temp_files) == chunk_size or current == end_date:
+            chunk_end_date = opr_ymd
+            chunk_filename = f"od_{chunk_start_date}_to_{chunk_end_date}.json"
+
+            merged_path = merge_json_files(temp_files, year, month, chunk_filename)
+            chunk_files.append(merged_path)
+
+            # temp 파일 삭제
+            for tmp in temp_files:
                 try:
-                    os.remove(tf)
-                except Exception:
+                    os.remove(tmp)
+                except:
                     pass
-            tmp_files = []
+            temp_files = []
 
-            if current_date + timedelta(days=1) <= end_date:
-                chunk_start = (current_date + timedelta(days=1)).strftime("%Y%m%d")
+            # 다음 chunk 시작점 갱신
+            if current < end_date:
+                chunk_start_date = (current + timedelta(days=1)).strftime("%Y%m%d")
 
-        current_date += timedelta(days=1)
+        current += timedelta(days=1)
+        time.sleep(1)
 
-    # ✅ 마지막: 월 전체 병합
-    final_path = f"raw/od_{year}{month:02d}_all.json"
-    merge_json_files(chunk_files, final_path)
+    # 월 전체 병합
+    final_filename = f"od_{year}{month:02d}_all.json"
+    final_path = merge_json_files(chunk_files, year, month, final_filename)
 
-    # 중간 병합 파일 삭제
-    for cf in chunk_files:
+    # 중간 chunk 삭제
+    for c in chunk_files:
         try:
-            os.remove(cf)
-        except Exception:
+            os.remove(c)
+        except:
             pass
 
-    print(f"🌕 Final monthly JSON created: {final_path}")
-    print("🧹 Cleaned up intermediate chunk files.")
+    print(f"🌕 Final merged file: {final_path}")
+    return final_path
 
 
+# --------------------------------------------------------------------
+# 🚀 실행부 (자동화 + 누락 월 백필)
+# --------------------------------------------------------------------
 if __name__ == "__main__":
-    # 데이터가 이미 존재하는지 확인
     start_year = 2025
     start_month = 4
 
-    # 현재 날짜 기준으로 데이터 확인
     today = datetime.now()
     current_year = today.year
     current_month = today.month
 
-    empty_months = []
-
-    # ------------------------------------------------------------------
-    # 🔍 1) 비어있는 달 확인 (백필용)
-    #
-    #  - start_year/start_month 부터 "완료된 달(지난달)"까지 확인
-    #  - 현재 연도는 current_month - 1(지난달)까지만 검사
-    # ------------------------------------------------------------------
+    # 누락 월 자동 수집
     for year in range(start_year, current_year + 1):
 
-        # 해당 연도에서 시작 월 결정
+        # 시작 월 설정
         if year == start_year:
-            start_m = start_month      # 첫 해는 지정한 start_month부터
+            m_start = start_month
         else:
-            start_m = 1                # 이후 연도는 1월부터
+            m_start = 1
 
-        # 해당 연도에서 검사할 마지막 월 결정
+        # 검사할 마지막 월
         if year < current_year:
-            max_month = 12             # 과거 연도는 12월까지
+            m_end = 12
         else:
-            max_month = current_month - 1  # 올해는 "지난달"까지만
+            m_end = current_month - 1
 
-        # 올해가 1월인 경우 current_month - 1 == 0 이 될 수 있음 → 스킵
-        if max_month < 1:
+        if m_end < 1:
             continue
 
-        for month in range(start_m, max_month + 1):
-            last_month_file = f"raw/od_{year}{month:02d}_all.json"
-            if not os.path.exists(last_month_file):
-                print(f"⚠️ {year}-{month:02d} 데이터가 없습니다.")
-                empty_months.append((year, month))
+        for month in range(m_start, m_end + 1):
+            expected = os.path.join(
+                RAW_OD_DIR,
+                f"{year}/{month:02d}/od_{year}{month:02d}_all.json"
+            )
 
-    # 비어있는 달에 대한 사용자 입력
-    if empty_months:
-        print("다음 달의 데이터가 비어 있습니다:")
-        for year, month in empty_months:
-            print(f"- {year}-{month:02d}")
+            if not os.path.exists(expected):
+                print(f"📡 Missing → Fetching {year}-{month:02d}")
+                fetch_od_monthly(year, month)
+            else:
+                print(f"✅ Exists: {expected}")
 
-        user_input = input("이 달들의 데이터를 호출하시겠습니까? (Y/N): ").strip().upper()
-        if user_input == 'Y':
-            for year, month in empty_months:
-                fetch_od_monthly_final(year=year, month=month)
-    else:
-        print("모든 데이터가 존재합니다.")
-
-
-    # ------------------------------------------------------------------
-    # 📅 3) 마지막으로 '지난달' 데이터 자동 호출 (운영/배치용)
-    #
-    #  - 오늘이 2025-11-13 이면 → last_month = 10 (10월)
-    #  - 오늘이 2025-01-10 이면 → last_month = 12, last_year = 2024
-    # ------------------------------------------------------------------
-    if today.month > 1:
-        last_month = today.month - 1
-        last_year = today.year
-    else:
-        last_month = 12
-        last_year = today.year - 1
-
-    last_month_file = f"raw/od_{last_year}{last_month:02d}_all.json"
-
-    if os.path.exists(last_month_file):
-        print(f"📅 지난달 데이터가 이미 존재합니다: {last_year}-{last_month:02d}.")
-    else:
-        print(f"📅 지난달 데이터 호출 중: {last_year}-{last_month:02d}.")
-        fetch_od_monthly_final(year=last_year, month=last_month)
+    print("🎉 OD Extract Completed Successfully")

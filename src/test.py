@@ -21,3 +21,4 @@ sorted(df["arvl_emd_nm"].dropna().unique())[:36]
 
 print(f"출발지 상위 36개 동:\n{df['dptre_emd_nm'].value_counts().head(36)}")
 print(f"도착지 상위 36개 동:\n{df['arvl_emd_nm'].value_counts().head(36)}")
+
