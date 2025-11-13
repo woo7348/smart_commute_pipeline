@@ -12,7 +12,7 @@ DB_USER = os.getenv("DB_USER", "airflow")
 DB_PASS = os.getenv("DB_PASS", "airflow")
 DB_PORT = os.getenv("DB_PORT", "5432")
 
-def load_weather_to_db(csv_path="output/weather_processed.csv"):
+def load_weather_to_db(csv_path="output/asos_seoul_202505_clean.csv"):
     # 1️⃣ CSV 읽기
     df = pd.read_csv(csv_path)
     print(f"📊 Loaded {len(df)} rows from {csv_path}")
