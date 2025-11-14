@@ -30,7 +30,7 @@ from datetime import datetime, timedelta
 # --------------------------------------------------------------------
 # 🌐 환경 변수 및 기본 설정
 # --------------------------------------------------------------------
-load_dotenv("/home/ubuntu/smart_commute_pipeline/.env")
+load_dotenv()
 
 SERVICE_KEY = os.getenv("WEATHER_API_KEY")
 if not SERVICE_KEY:
